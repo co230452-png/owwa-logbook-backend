@@ -21,8 +21,6 @@ const seed = async () => {
     console.log(`✅ Admin: ${admin.email} / Admin@1234`);
 
     const sampleUsers = [
-      { firstName: 'Maria',  lastName: 'Santos',    email: 'maria.santos@email.com',   phone: '09181234567', owwaId: 'OWWA-2024-001', address: 'Zamboanga City',    password: 'User@1234', status: 'approved' },
-      { firstName: 'Juan',   lastName: 'Dela Cruz', email: 'juan.delacruz@email.com',  phone: '09191234567', owwaId: 'OWWA-2024-002', address: 'Pagadian City',    password: 'User@1234', status: 'approved' },
       { firstName: 'Ana',    lastName: 'Reyes',     email: 'ana.reyes@email.com',      phone: '09201234567', owwaId: 'OWWA-2024-003', address: 'Dipolog City',     password: 'User@1234', status: 'approved' },
       { firstName: 'Pedro',  lastName: 'Garcia',    email: 'pedro.garcia@email.com',   phone: '09211234567', owwaId: '',              address: 'Dapitan City',    password: 'User@1234', status: 'pending'  },
       { firstName: 'Rosa',   lastName: 'Lim',       email: 'rosa.lim@email.com',       phone: '09221234567', owwaId: '',              address: 'Zamboanga Norte', password: 'User@1234', status: 'pending'  },
@@ -77,7 +75,7 @@ const seed = async () => {
 
     console.log('\n🎉 Seed complete!');
     console.log('  Admin:  admin@owwa9.gov.ph / Admin@1234');
-    console.log('  User:   maria.santos@email.com / User@1234\n');
+    console.log('  User:   ana.reyes@email.com / User@1234\n');
     process.exit(0);
   } catch (err) {
     console.error('❌ Seed error:', err);

@@ -198,12 +198,25 @@ const clearSlot = async (req, res) => {
 // @access  Admin
 const getAllAttendance = async (req, res) => {
   try {
-    const { startDate, endDate, userId, page = 1, limit = 50 } = req.query;
+    const { startDate, endDate, userId, search, page = 1, limit = 50 } = req.query;
     let query = {};
     if (startDate && endDate) query.date = { $gte: startDate, $lte: endDate };
     else if (startDate) query.date = { $gte: startDate };
     else if (endDate)   query.date = { $lte: endDate };
     if (userId) query.userId = userId;
+
+    // If searching by name, first find matching user IDs
+    if (search) {
+      const User = require('../models/User');
+      const matchingUsers = await User.find({
+        $or: [
+          { firstName: { $regex: search, $options: 'i' } },
+          { lastName:  { $regex: search, $options: 'i' } },
+          { owwaId:    { $regex: search, $options: 'i' } },
+        ],
+      }).select('_id');
+      query.userId = { $in: matchingUsers.map(u => u._id) };
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [records, total] = await Promise.all([
