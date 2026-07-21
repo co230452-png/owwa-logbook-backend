@@ -1,21 +1,44 @@
 const Attendance = require('../models/Attendance');
 const User = require('../models/User');
 
-const BUFFER_MINUTES = 5; // minimum minutes between scans
+const BUFFER_MINUTES = 5;
 
 /**
- * Determine which slot to fill next.
- * Order: morningIn → morningOut → afternoonIn → afternoonOut
+ * Determine which slot to fill based on current time and record state.
+ *
+ * Rules:
+ * - Before 12:00 noon:
+ *   → morningIn first, then morningOut
+ *   → if morning is complete, allow afternoonIn (early afternoon)
+ * - After 12:00 noon:
+ *   → skip morning slots entirely
+ *   → afternoonIn first, then afternoonOut
+ *   → even if morningIn/Out are empty
  */
-function nextSlot(record) {
-  if (!record.morningIn)    return { slot: 'morningIn',    label: 'Morning In' };
-  if (!record.morningOut)   return { slot: 'morningOut',   label: 'Morning Out' };
-  if (!record.afternoonIn)  return { slot: 'afternoonIn',  label: 'Afternoon In' };
-  if (!record.afternoonOut) return { slot: 'afternoonOut', label: 'Afternoon Out' };
-  return null;
+function nextSlot(record, now) {
+  const hour = now.getHours();
+  const isAfternoon = hour >= 12;
+
+  if (!isAfternoon) {
+    // Morning time
+    if (!record.morningIn)    return { slot: 'morningIn',    label: 'Morning In' };
+    if (!record.morningOut)   return { slot: 'morningOut',   label: 'Morning Out' };
+    // Morning complete — allow afternoon in early
+    if (!record.afternoonIn)  return { slot: 'afternoonIn',  label: 'Afternoon In' };
+    if (!record.afternoonOut) return { slot: 'afternoonOut', label: 'Afternoon Out' };
+  } else {
+    // Afternoon time — skip morning, go straight to afternoon
+    if (!record.afternoonIn)  return { slot: 'afternoonIn',  label: 'Afternoon In' };
+    if (!record.afternoonOut) return { slot: 'afternoonOut', label: 'Afternoon Out' };
+    // If afternoon is done, check if morning was missed (allow late morning entry)
+    if (!record.morningIn)    return { slot: 'morningIn',    label: 'Morning In (Late)' };
+    if (!record.morningOut)   return { slot: 'morningOut',   label: 'Morning Out (Late)' };
+  }
+
+  return null; // All slots filled
 }
 
-/** Get the most recently filled slot's timestamp */
+/** Get the most recently filled slot timestamp */
 function lastScanTime(record) {
   const times = [record.morningIn, record.morningOut, record.afternoonIn, record.afternoonOut]
     .filter(Boolean)
@@ -25,7 +48,9 @@ function lastScanTime(record) {
 }
 
 function buildSummary(record) {
-  const fmt = (d) => d ? new Date(d).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }) : '—';
+  const fmt = (d) => d
+    ? new Date(d).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })
+    : '—';
   return {
     morningIn:      fmt(record.morningIn),
     morningOut:     fmt(record.morningOut),
@@ -43,7 +68,7 @@ function formatMinutes(mins) {
   return `${h}h ${m}m`;
 }
 
-// @desc    Log attendance via QR scan (auto-fills next slot, 5-min buffer)
+// @desc    Log attendance via QR scan
 // @route   POST /api/attendance/log
 // @access  Admin
 const logAttendance = async (req, res) => {
@@ -64,13 +89,12 @@ const logAttendance = async (req, res) => {
     const today = new Date().toISOString().split('T')[0];
     const now   = new Date();
 
-    // Find or create today's record
     let record = await Attendance.findOne({ userId, date: today });
     if (!record) {
       record = new Attendance({ userId, date: today, scannedBy: req.user._id });
     }
 
-    // ── 5-minute buffer check ────────────────────────────────────
+    // 5-minute buffer check
     const last = lastScanTime(record);
     if (last) {
       const diffMinutes = (now - last) / 60000;
@@ -86,18 +110,17 @@ const logAttendance = async (req, res) => {
       }
     }
 
-    // ── Check all slots filled ───────────────────────────────────
-    const next = nextSlot(record);
+    // Get next slot based on time of day
+    const next = nextSlot(record, now);
     if (!next) {
       return res.status(409).json({
-        message: `All 4 log slots for ${user.firstName} ${user.lastName} are filled for today.`,
+        message: `All log slots for ${user.firstName} ${user.lastName} are filled for today.`,
         allFilled: true,
         user: { firstName: user.firstName, lastName: user.lastName },
         record,
       });
     }
 
-    // ── Fill the next slot ───────────────────────────────────────
     record[next.slot] = now;
     record.scannedBy  = req.user._id;
     record.computeTotal();
@@ -110,42 +133,33 @@ const logAttendance = async (req, res) => {
       record,
       summary: buildSummary(record),
       user: {
-        _id:       user._id,
-        firstName: user.firstName,
-        lastName:  user.lastName,
-        email:     user.email,
-        owwaId:    user.owwaId,
+        _id: user._id, firstName: user.firstName, lastName: user.lastName,
+        email: user.email, owwaId: user.owwaId,
       },
     });
   } catch (error) {
     console.error('Log attendance error:', error);
-    if (error.code === 11000) {
-      return res.status(409).json({ message: 'Duplicate entry — please try again.' });
-    }
+    if (error.code === 11000) return res.status(409).json({ message: 'Duplicate entry — please try again.' });
     res.status(500).json({ message: 'Server error logging attendance' });
   }
 };
 
-// @desc    Edit a specific time slot in an attendance record
+// @desc    Edit a specific time slot
 // @route   PATCH /api/attendance/:id/slot
 // @access  Admin
 const editSlot = async (req, res) => {
   const { slot, value } = req.body;
   const validSlots = ['morningIn', 'morningOut', 'afternoonIn', 'afternoonOut'];
-
   if (!validSlots.includes(slot)) {
-    return res.status(400).json({ message: 'Invalid slot. Must be morningIn, morningOut, afternoonIn, or afternoonOut.' });
+    return res.status(400).json({ message: 'Invalid slot' });
   }
-
   try {
     const record = await Attendance.findById(req.params.id);
-    if (!record) return res.status(404).json({ message: 'Attendance record not found' });
+    if (!record) return res.status(404).json({ message: 'Record not found' });
 
-    // value can be a time string (HH:MM) or null to clear the slot
     if (value === null || value === '') {
       record[slot] = null;
     } else {
-      // Combine date with provided time (HH:MM) to build full Date
       const [hours, minutes] = value.split(':').map(Number);
       const dt = new Date(`${record.date}T00:00:00`);
       dt.setHours(hours, minutes, 0, 0);
@@ -154,39 +168,27 @@ const editSlot = async (req, res) => {
 
     record.computeTotal();
     await record.save();
-
     await record.populate('userId', 'firstName lastName email owwaId phone');
 
-    res.json({
-      message: `${slot} updated successfully`,
-      record,
-      summary: buildSummary(record),
-    });
+    res.json({ message: `${slot} updated successfully`, record, summary: buildSummary(record) });
   } catch (error) {
-    console.error('Edit slot error:', error);
     res.status(500).json({ message: 'Server error updating slot' });
   }
 };
 
-// @desc    Clear (null) a specific time slot
+// @desc    Clear a specific slot
 // @route   DELETE /api/attendance/:id/slot/:slot
 // @access  Admin
 const clearSlot = async (req, res) => {
   const validSlots = ['morningIn', 'morningOut', 'afternoonIn', 'afternoonOut'];
   const { slot } = req.params;
-
-  if (!validSlots.includes(slot)) {
-    return res.status(400).json({ message: 'Invalid slot name' });
-  }
-
+  if (!validSlots.includes(slot)) return res.status(400).json({ message: 'Invalid slot' });
   try {
     const record = await Attendance.findById(req.params.id);
     if (!record) return res.status(404).json({ message: 'Record not found' });
-
     record[slot] = null;
     record.computeTotal();
     await record.save();
-
     res.json({ message: `${slot} cleared`, record });
   } catch (error) {
     res.status(500).json({ message: 'Server error clearing slot' });
@@ -205,9 +207,7 @@ const getAllAttendance = async (req, res) => {
     else if (endDate)   query.date = { $lte: endDate };
     if (userId) query.userId = userId;
 
-    // If searching by name, first find matching user IDs
     if (search) {
-      const User = require('../models/User');
       const matchingUsers = await User.find({
         $or: [
           { firstName: { $regex: search, $options: 'i' } },
@@ -267,7 +267,7 @@ const getMyAttendance = async (req, res) => {
   }
 };
 
-// @desc    Delete entire attendance record
+// @desc    Delete attendance record
 // @route   DELETE /api/attendance/:id
 // @access  Admin
 const deleteAttendance = async (req, res) => {
@@ -281,11 +281,6 @@ const deleteAttendance = async (req, res) => {
 };
 
 module.exports = {
-  logAttendance,
-  editSlot,
-  clearSlot,
-  getAllAttendance,
-  getMyAttendance,
-  getTodayAttendance,
-  deleteAttendance,
+  logAttendance, editSlot, clearSlot,
+  getAllAttendance, getMyAttendance, getTodayAttendance, deleteAttendance,
 };

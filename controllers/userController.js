@@ -108,6 +108,39 @@ const setDefaultPassword = async (req, res) => {
   }
 };
 
+// @desc    Update own profile info
+const updateProfile = async (req, res) => {
+  const { firstName, lastName, phone, address, owwaId } = req.body;
+  if (!firstName || !lastName) {
+    return res.status(400).json({ message: 'First name and last name are required' });
+  }
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    user.firstName = firstName.trim();
+    user.lastName  = lastName.trim();
+    user.phone     = phone?.trim()   || user.phone;
+    user.address   = address?.trim() || user.address;
+    if (user.role !== 'admin') {
+      user.owwaId = owwaId?.trim() || user.owwaId;
+    }
+    await user.save();
+
+    res.json({
+      message: 'Profile updated successfully',
+      user: {
+        _id: user._id, firstName: user.firstName, lastName: user.lastName,
+        email: user.email, phone: user.phone, address: user.address,
+        owwaId: user.owwaId, role: user.role, status: user.status,
+        qrCode: user.qrCode,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error updating profile' });
+  }
+};
+
 // @desc    Change own password (any logged-in user)
 const changePassword = async (req, res) => {
   const { currentPassword, newPassword } = req.body;
@@ -149,5 +182,5 @@ const getDashboardStats = async (req, res) => {
 
 module.exports = {
   getPendingUsers, getAllUsers, updateUserStatus, getUserById,
-  deleteUser, setDefaultPassword, changePassword, getDashboardStats,
+  deleteUser, setDefaultPassword, changePassword, updateProfile, getDashboardStats,
 };

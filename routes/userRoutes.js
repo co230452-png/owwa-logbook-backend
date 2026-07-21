@@ -1,14 +1,15 @@
 const express = require('express');
 const {
   getPendingUsers, getAllUsers, updateUserStatus, getUserById,
-  deleteUser, setDefaultPassword, changePassword, getDashboardStats,
+  deleteUser, setDefaultPassword, changePassword, updateProfile, getDashboardStats,
 } = require('../controllers/userController');
 const { protect, adminOnly } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
-// Change own password — any logged-in user
+// Self-service routes — any logged-in user
 router.patch('/change-password', protect, changePassword);
+router.patch('/update-profile',  protect, updateProfile);
 
 // Admin only routes
 router.use(protect, adminOnly);
