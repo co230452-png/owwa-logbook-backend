@@ -110,16 +110,28 @@ const setDefaultPassword = async (req, res) => {
 
 // @desc    Update own profile info
 const updateProfile = async (req, res) => {
-  const { firstName, lastName, phone, address, owwaId } = req.body;
+  const { firstName, lastName, email, phone, address, owwaId } = req.body;
   if (!firstName || !lastName) {
     return res.status(400).json({ message: 'First name and last name are required' });
+  }
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    return res.status(400).json({ message: 'Please enter a valid email address' });
   }
   try {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
+    // Check if new email is already taken by someone else
+    if (email.toLowerCase() !== user.email) {
+      const existing = await User.findOne({ email: email.toLowerCase() });
+      if (existing) {
+        return res.status(400).json({ message: 'This email is already used by another account' });
+      }
+    }
+
     user.firstName = firstName.trim();
     user.lastName  = lastName.trim();
+    user.email     = email.toLowerCase().trim();
     user.phone     = phone?.trim()   || user.phone;
     user.address   = address?.trim() || user.address;
     if (user.role !== 'admin') {

@@ -7,32 +7,40 @@ const BUFFER_MINUTES = 5;
  * Determine which slot to fill based on current time and record state.
  *
  * Rules:
- * - Before 12:00 noon:
- *   → morningIn first, then morningOut
- *   → if morning is complete, allow afternoonIn (early afternoon)
- * - After 12:00 noon:
- *   → skip morning slots entirely
- *   → afternoonIn first, then afternoonOut
- *   → even if morningIn/Out are empty
+ * 1. If morningIn exists but morningOut is empty → always morningOut (regardless of time)
+ * 2. If morningIn and morningOut both exist → move to afternoon slots
+ * 3. If no morningIn and time is before 12:00 → morningIn
+ * 4. If no morningIn and time is after 12:00 → skip morning, go to afternoonIn
+ * 5. If afternoonIn exists but afternoonOut empty → afternoonOut
  */
 function nextSlot(record, now) {
   const hour = now.getHours();
   const isAfternoon = hour >= 12;
 
-  if (!isAfternoon) {
-    // Morning time
-    if (!record.morningIn)    return { slot: 'morningIn',    label: 'Morning In' };
-    if (!record.morningOut)   return { slot: 'morningOut',   label: 'Morning Out' };
-    // Morning complete — allow afternoon in early
-    if (!record.afternoonIn)  return { slot: 'afternoonIn',  label: 'Afternoon In' };
-    if (!record.afternoonOut) return { slot: 'afternoonOut', label: 'Afternoon Out' };
-  } else {
-    // Afternoon time — skip morning, go straight to afternoon
-    if (!record.afternoonIn)  return { slot: 'afternoonIn',  label: 'Afternoon In' };
-    if (!record.afternoonOut) return { slot: 'afternoonOut', label: 'Afternoon Out' };
-    // If afternoon is done, check if morning was missed (allow late morning entry)
-    if (!record.morningIn)    return { slot: 'morningIn',    label: 'Morning In (Late)' };
-    if (!record.morningOut)   return { slot: 'morningOut',   label: 'Morning Out (Late)' };
+  // Priority 1: If they scanned morning in, next must be morning out
+  if (record.morningIn && !record.morningOut) {
+    return { slot: 'morningOut', label: 'Morning Out' };
+  }
+
+  // Priority 2: If morning is complete or skipped, handle afternoon
+  if (record.afternoonIn && !record.afternoonOut) {
+    return { slot: 'afternoonOut', label: 'Afternoon Out' };
+  }
+
+  // Priority 3: No morning in yet
+  if (!record.morningIn) {
+    if (!isAfternoon) {
+      // Before noon — start with morning in
+      return { slot: 'morningIn', label: 'Morning In' };
+    } else {
+      // After noon — skip morning, go straight to afternoon
+      if (!record.afternoonIn) return { slot: 'afternoonIn', label: 'Afternoon In' };
+    }
+  }
+
+  // Priority 4: Morning complete, start afternoon
+  if (record.morningIn && record.morningOut && !record.afternoonIn) {
+    return { slot: 'afternoonIn', label: 'Afternoon In' };
   }
 
   return null; // All slots filled
